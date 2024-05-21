@@ -104,30 +104,75 @@ let erase_exp = (e: Zexp.t): Hexp.t => {
   };
 };
 
-let syn = (ctx: typctx, e: Hexp.t): option(Htyp.t) => {
-  // Used to suppress unused variable warnings
-  // Okay to remove
-  let _ = ctx;
+let rec compatible = (t1: Htyp.t, t2: Htyp.t): bool => {
+  switch (t1, t2) {
+  | (Htyp.Hole, _) => true
+  | (_, Htyp.Hole) => true
+  | (Htyp.Arrow(t1i, t1o), Htyp.Arrow(t2i, t2o)) =>
+    compatible(t1i, t2i) && compatible(t1o, t2o)
+  | (Htyp.Arrow(_, _), Htyp.Num) => false
+  | (_, Htyp.Arrow(_, Htyp.Num)) => false
+  | _ => t1 == t2
+  };
+}
+
+and match = (t: Htyp.t): Htyp.t => {
+  switch (t) {
+  | Htyp.Hole => Htyp.Arrow(Htyp.Hole, Htyp.Hole)
+  | Htyp.Arrow(tin, tout) => Htyp.Arrow(tin, tout)
+  | _ => Htyp.Hole // Essentially "None," but without the need for an option type
+  };
+};
+
+let rec syn = (ctx: typctx, e: Hexp.t): option(Htyp.t) => {
   switch (e) {
-  | Var(_: string) => raise(Unimplemented)
+  | Var(s: string) =>
+    switch (TypCtx.find(s, ctx)) {
+    | item => Some(item)
+    | exception _ => None
+    }
   | Lam(_: string, _: Hexp.t) => raise(Unimplemented)
-  | Ap(_: Hexp.t, _: Hexp.t) => raise(Unimplemented)
+  | Ap(f: Hexp.t, x: Hexp.t) =>
+    let t1 = syn(ctx, f);
+    switch (t1) {
+    | None => None
+    | Some(t1) =>
+      switch (match(t1)) {
+      | Htyp.Arrow(t2, tprime) =>
+        if (ana(ctx, x, t2)) {
+          Some(tprime);
+        } else {
+          None;
+        }
+      | _ => None
+      }
+    };
   | Lit(_: int) => Some(Htyp.Num)
-  | Plus(_: Hexp.t, _: Hexp.t) => raise(Unimplemented)
+  | Plus(l: Hexp.t, r: Hexp.t) =>
+    if (ana(ctx, l, Htyp.Num) && ana(ctx, r, Htyp.Num)) {
+      Some(Htyp.Num);
+    } else {
+      None;
+    }
   | Asc(_: Hexp.t, _: Htyp.t) => raise(Unimplemented)
-  | EHole => raise(Unimplemented)
-  | NEHole(_: Hexp.t) => raise(Unimplemented)
+  | EHole => Some(Htyp.Hole)
+  | NEHole(h: Hexp.t) =>
+    switch (syn(ctx, h)) {
+    | None => None
+    | _ => Some(Htyp.Hole)
+    }
   };
 }
 
 and ana = (ctx: typctx, e: Hexp.t, t: Htyp.t): bool => {
-  // Used to suppress unused variable warnings
-  // Okay to remove
-  let _ = ctx;
-  let _ = e;
-  let _ = t;
-
-  raise(Unimplemented);
+  switch (e) {
+  | Lam(_: string, _: Hexp.t) => raise(Unimplemented)
+  | _ =>
+    switch (syn(ctx, e)) {
+    | Some(item) => compatible(t, item)
+    | None => false
+    }
+  };
 };
 
 let syn_action =
@@ -154,6 +199,10 @@ and ana_action =
   let _ = e;
   let _ = a;
   let _ = t;
-
-  raise(Unimplemented);
+  switch (a) {
+  | Move(_: Dir.t) => raise(Unimplemented)
+  | Construct(_: Shape.t) => raise(Unimplemented)
+  | Del => raise(Unimplemented)
+  | Finish => raise(Unimplemented)
+  };
 };
