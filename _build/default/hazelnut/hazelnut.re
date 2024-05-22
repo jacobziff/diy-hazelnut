@@ -131,7 +131,7 @@ let rec syn = (ctx: typctx, e: Hexp.t): option(Htyp.t) => {
     | item => Some(item)
     | exception _ => None
     }
-  | Lam(_: string, _: Hexp.t) => raise(Unimplemented)
+  | Lam(_: string, _: Hexp.t) => None // There is no type synthesis rule that applies to this form, so lambda abstractions can appear only in analytic position, i.e. where an expected type is known.
   | Ap(f: Hexp.t, x: Hexp.t) =>
     let t1 = syn(ctx, f);
     switch (t1) {
@@ -154,7 +154,12 @@ let rec syn = (ctx: typctx, e: Hexp.t): option(Htyp.t) => {
     } else {
       None;
     }
-  | Asc(_: Hexp.t, _: Htyp.t) => raise(Unimplemented)
+  | Asc(h: Hexp.t, t: Htyp.t) =>
+    if (ana(ctx, h, t)) {
+      Some(t);
+    } else {
+      None;
+    }
   | EHole => Some(Htyp.Hole)
   | NEHole(h: Hexp.t) =>
     switch (syn(ctx, h)) {
@@ -166,7 +171,11 @@ let rec syn = (ctx: typctx, e: Hexp.t): option(Htyp.t) => {
 
 and ana = (ctx: typctx, e: Hexp.t, t: Htyp.t): bool => {
   switch (e) {
-  | Lam(_: string, _: Hexp.t) => raise(Unimplemented)
+  | Lam(x: string, h: Hexp.t) =>
+    switch (match(t)) {
+    | Htyp.Arrow(t1, t2) => ana(TypCtx.add(x, t1, ctx), h, t2)
+    | _ => false
+    }
   | _ =>
     switch (syn(ctx, e)) {
     | Some(item) => compatible(t, item)
