@@ -89,37 +89,45 @@ type typctx = TypCtx.t(Htyp.t);
 
 exception Unimplemented;
 
-let erase_exp = (e: Zexp.t): Hexp.t => {
-  // Used to suppress unused variable warnings
+let rec erase_exp = (e: Zexp.t): Hexp.t => {
   switch (e) {
-  | Cursor(h: Hexp.t) => h
-  | Lam(_: string, _: Zexp.t) => raise(Unimplemented)
-  | LAp(_: Zexp.t, h: Hexp.t) => h
-  | RAp(h: Hexp.t, _: Zexp.t) => h
-  | LPlus(_: Zexp.t, h: Hexp.t) => h
-  | RPlus(h: Hexp.t, _: Zexp.t) => h
-  | LAsc(_: Zexp.t, _: Htyp.t) => raise(Unimplemented)
-  | RAsc(h: Hexp.t, _: Ztyp.t) => h
-  | NEHole(_: Zexp.t) => raise(Unimplemented)
+  | Cursor(h: Hexp.t) => h // EETop
+  | Lam(s: string, z: Zexp.t) => Lam(s, erase_exp(z)) // EELam
+  | LAp(z: Zexp.t, h: Hexp.t) => Ap(erase_exp(z), h) // EEAPL
+  | RAp(h: Hexp.t, z: Zexp.t) => Ap(h, erase_exp(z)) // EEAPR
+  | LPlus(z: Zexp.t, h: Hexp.t) => Plus(erase_exp(z), h) // EEPlusL
+  | RPlus(h: Hexp.t, z: Zexp.t) => Plus(h, erase_exp(z)) // EEPlusR
+  | LAsc(z: Zexp.t, t: Htyp.t) => Asc(erase_exp(z), t) // EEAscL
+  | RAsc(h: Hexp.t, z: Ztyp.t) => Asc(h, erase_typ(z)) // EEAscR
+  | NEHole(z: Zexp.t) => NEHole(erase_exp(z)) // EENEHole
+  };
+}
+
+and erase_typ = (t: Ztyp.t): Htyp.t => {
+  switch (t) {
+  | Cursor(h: Htyp.t) => h // ETTop
+  | LArrow(z: Ztyp.t, h: Htyp.t) => Arrow(erase_typ(z), h) // ETArrL
+  | RArrow(h: Htyp.t, z: Ztyp.t) => Arrow(h, erase_typ(z)) // ETArrR
   };
 };
 
 let rec compatible = (t1: Htyp.t, t2: Htyp.t): bool => {
   switch (t1, t2) {
-  | (Htyp.Hole, _) => true
-  | (_, Htyp.Hole) => true
+  | (Htyp.Hole, _) => true // TCHole2
+  | (_, Htyp.Hole) => true // TCHole1
   | (Htyp.Arrow(t1i, t1o), Htyp.Arrow(t2i, t2o)) =>
+    // TCarr
     compatible(t1i, t2i) && compatible(t1o, t2o)
-  | (Htyp.Arrow(_, _), Htyp.Num) => false
-  | (_, Htyp.Arrow(_, Htyp.Num)) => false
-  | _ => t1 == t2
+  | (Htyp.Arrow(_, _), Htyp.Num) => false // ICNumArr2
+  | (Htyp.Num, Htyp.Arrow(_, _)) => false // ICNumArr1
+  | _ => t1 == t2 // TCRefl, ICArr1, ICArr2
   };
 }
 
 and match = (t: Htyp.t): Htyp.t => {
   switch (t) {
-  | Htyp.Hole => Htyp.Arrow(Htyp.Hole, Htyp.Hole)
-  | Htyp.Arrow(tin, tout) => Htyp.Arrow(tin, tout)
+  | Htyp.Hole => Htyp.Arrow(Htyp.Hole, Htyp.Hole) // MAHole
+  | Htyp.Arrow(tin, tout) => Htyp.Arrow(tin, tout) // MAArr
   | _ => Htyp.Hole // Essentially "None," but without the need for an option type
   };
 };
@@ -127,12 +135,14 @@ and match = (t: Htyp.t): Htyp.t => {
 let rec syn = (ctx: typctx, e: Hexp.t): option(Htyp.t) => {
   switch (e) {
   | Var(s: string) =>
+    // SVar
     switch (TypCtx.find(s, ctx)) {
     | item => Some(item)
     | exception _ => None
     }
   | Lam(_: string, _: Hexp.t) => None // There is no type synthesis rule that applies to this form, so lambda abstractions can appear only in analytic position, i.e. where an expected type is known.
   | Ap(f: Hexp.t, x: Hexp.t) =>
+    // SAp
     let t1 = syn(ctx, f);
     switch (t1) {
     | None => None
@@ -147,21 +157,24 @@ let rec syn = (ctx: typctx, e: Hexp.t): option(Htyp.t) => {
       | _ => None
       }
     };
-  | Lit(_: int) => Some(Htyp.Num)
+  | Lit(_: int) => Some(Htyp.Num) // SNum
   | Plus(l: Hexp.t, r: Hexp.t) =>
+    // SPlus
     if (ana(ctx, l, Htyp.Num) && ana(ctx, r, Htyp.Num)) {
       Some(Htyp.Num);
     } else {
       None;
     }
   | Asc(h: Hexp.t, t: Htyp.t) =>
+    // SAsc
     if (ana(ctx, h, t)) {
       Some(t);
     } else {
       None;
     }
-  | EHole => Some(Htyp.Hole)
+  | EHole => Some(Htyp.Hole) // SHole
   | NEHole(h: Hexp.t) =>
+    // SNEHole
     switch (syn(ctx, h)) {
     | None => None
     | _ => Some(Htyp.Hole)
@@ -172,11 +185,13 @@ let rec syn = (ctx: typctx, e: Hexp.t): option(Htyp.t) => {
 and ana = (ctx: typctx, e: Hexp.t, t: Htyp.t): bool => {
   switch (e) {
   | Lam(x: string, h: Hexp.t) =>
+    // ALam
     switch (match(t)) {
     | Htyp.Arrow(t1, t2) => ana(TypCtx.add(x, t1, ctx), h, t2)
     | _ => false
     }
   | _ =>
+    // ASubsume
     switch (syn(ctx, e)) {
     | Some(item) => compatible(t, item)
     | None => false
