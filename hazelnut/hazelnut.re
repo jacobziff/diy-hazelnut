@@ -202,31 +202,177 @@ and ana = (ctx: typctx, e: Hexp.t, t: Htyp.t): bool => {
 let syn_action =
     (ctx: typctx, (e: Zexp.t, t: Htyp.t), a: Action.t)
     : option((Zexp.t, Htyp.t)) => {
-  // Used to suppress unused variable warnings
-  // Okay to remove
-  let _ = ctx;
-  let _ = e;
-  let _ = t;
   switch (a) {
+  // | Zipper Cases? raise(Unimplemented)
   | Move(_: Dir.t) => raise(Unimplemented)
-  | Construct(_: Shape.t) => raise(Unimplemented)
-  | Del => raise(Unimplemented)
-  | Finish => raise(Unimplemented)
+  | Construct(s: Shape.t) =>
+    switch (s) {
+    | Arrow => raise(Unimplemented)
+    | Num => raise(Unimplemented)
+    | Asc =>
+      // SaConAsc
+      switch (e) {
+      | Cursor(h) => Some((RAsc(h, Cursor(t)), t))
+      | _ => None
+      }
+    | Var(x: string) =>
+      // SAConVar
+      switch (e, t) {
+      | (Cursor(EHole), Htyp.Hole) =>
+        Some((Cursor(Var(x)), TypCtx.find(x, ctx)))
+      | _ => None
+      }
+    | Lam(x: string) =>
+      // SaConLam
+      switch (e, t) {
+      | (Cursor(EHole), Hole) =>
+        Some((
+          RAsc(Lam(x, EHole), LArrow(Cursor(Hole), Hole)),
+          Arrow(Hole, Hole),
+        ))
+      | _ => None
+      }
+    | Ap =>
+      switch (match(t)) {
+      | Htyp.Hole =>
+        // SaConAPOtw
+        if (compatible(t, Htyp.Arrow(Htyp.Hole, Htyp.Hole))) {
+          None;
+        } else {
+          switch (e) {
+          | Cursor(h: Hexp.t) =>
+            Some((RAp(NEHole(h), Cursor(EHole)), Htyp.Hole))
+          | _ => None
+          };
+        }
+      | Htyp.Arrow(_: Htyp.t, t2: Htyp.t) =>
+        // SAConAPArr
+        switch (e) {
+        | Cursor(h: Hexp.t) => Some((RAp(h, Cursor(EHole)), t2))
+        | _ => None
+        }
+      | _ => None
+      }
+    | Lit(n: int) =>
+      // SAConNumLit
+      switch (e, t) {
+      | (Cursor(EHole), Hole) => Some((Cursor(Lit(n)), Num))
+      | _ => None
+      }
+    | Plus =>
+      if (compatible(t, Htyp.Num)) {
+        // SAConPlus1
+        switch (e) {
+        | Cursor(h) => Some((RPlus(h, Cursor(EHole)), Htyp.Num))
+        | _ => None
+        };
+      } else {
+        // SAConPlus2
+        switch (e) {
+        | Cursor(h) => Some((RPlus(NEHole(h), Cursor(EHole)), Htyp.Num))
+        | _ => None
+        };
+      }
+    | NEHole =>
+      // SAConNEHole
+      switch (e) {
+      | Cursor(h) => Some((NEHole(Cursor(h)), Hole))
+      | _ => None
+      }
+    }
+  | Del =>
+    switch (e) {
+    | Cursor(_: Hexp.t) => Some((Cursor(EHole), t)) // SADel
+    | _ => None
+    }
+  | Finish =>
+    switch (e, t) {
+    | (Cursor(NEHole(h: Hexp.t)), Hole) =>
+      // SAFinish
+      switch (syn(ctx, h)) {
+      | Some(t') => Some((Cursor(h), t'))
+      | _ => None
+      }
+    | _ => None
+    }
   };
 }
 
 and ana_action =
     (ctx: typctx, e: Zexp.t, a: Action.t, t: Htyp.t): option(Zexp.t) => {
-  // Used to suppress unused variable warnings
-  // Okay to remove
-  let _ = ctx;
-  let _ = e;
-  let _ = a;
-  let _ = t;
   switch (a) {
+  // | Zipper Cases? raise(Unimplemented)
   | Move(_: Dir.t) => raise(Unimplemented)
-  | Construct(_: Shape.t) => raise(Unimplemented)
-  | Del => raise(Unimplemented)
-  | Finish => raise(Unimplemented)
+  | Construct(s: Shape.t) =>
+    switch (s) {
+    | Arrow => raise(Unimplemented)
+    | Num => raise(Unimplemented)
+    | Asc =>
+      // AAConAsc
+      switch (e) {
+      | Cursor(h) => Some(RAsc(h, Cursor(t)))
+      | _ => None
+      }
+    | Var(x: string) =>
+      // AAConVar
+      switch (e) {
+      | Cursor(EHole) => Some(NEHole(Cursor(Var(x))))
+      | _ => None
+      }
+    | Lam(x: string) =>
+      switch (match(t)) {
+      | Hole =>
+        // AAConLam2
+        switch (e) {
+        | Cursor(EHole) =>
+          if (compatible(t, Arrow(Hole, Hole))) {
+            None;
+          } else {
+            Some(
+              NEHole(RAsc(Lam(x, EHole), LArrow(Cursor(Hole), Hole))),
+            );
+          }
+        | _ => None
+        }
+      | Arrow(_, _) =>
+        // AAConLam1
+        switch (e) {
+        | Cursor(EHole) => Some(Lam(x, Cursor(EHole)))
+        | _ => None
+        }
+      | _ => None
+      }
+    | Ap => None
+    | Lit(n: int) =>
+      // AAConNumLit
+      switch (e) {
+      | Cursor(EHole) =>
+        if (compatible(t, Htyp.Num)) {
+          None;
+        } else {
+          Some(NEHole(Cursor(Lit(n))));
+        }
+      | _ => None
+      }
+    | Plus => None
+    | NEHole => None
+    }
+  | Del =>
+    switch (e) {
+    | Cursor(_: Hexp.t) => Some(Cursor(EHole)) // AADel
+    | _ => None
+    }
+  | Finish =>
+    switch (e) {
+    | Cursor(NEHole(h: Hexp.t)) =>
+      // AAFinish
+      let t' = ana(ctx, h, t);
+      if (t') {
+        Some(Cursor(h));
+      } else {
+        None;
+      };
+    | _ => None
+    }
   };
 };
