@@ -317,7 +317,7 @@ and ana_action =
     }
   | _ =>
     switch (a) {
-    | Move(d: Dir.t) => exp_action(e, d)
+    | Move(d: Dir.t) => exp_action(e, d) // AAMove
     | Construct(s: Shape.t) =>
       switch (s) {
       | Arrow => None // Unsure about this
@@ -408,9 +408,32 @@ and ana_action =
 }
 
 // A.3.1
-// and typ_action = (_: Ztyp.t, _: Action.t): option(Ztyp.t) => {
-//   raise(Unimplemented);
-// }
+and typ_action = (t: Ztyp.t, a: Action.t): option(Ztyp.t) => {
+  switch (t, a) {
+  | (Cursor(Arrow(t1, t2)), Move(Child(One))) =>
+    Some(LArrow(Cursor(t1), t2)) // TMArrChild1
+  | (Cursor(Arrow(t1, t2)), Move(Child(Two))) =>
+    Some(RArrow(t1, Cursor(t2))) // TMArrChild2
+  | (LArrow(Cursor(t1), t2), Move(Parent)) => Some(Cursor(Arrow(t1, t2))) // TMArrParent1
+  | (RArrow(t1, Cursor(t2)), Move(Parent)) => Some(Cursor(Arrow(t1, t2))) // TMArrParent2
+  | (Cursor(_), Del) => Some(Cursor(Hole)) // TMDel
+  | (Cursor(t), Construct(Arrow)) => Some(RArrow(t, Cursor(Hole))) // TMConArrow
+  | (Cursor(Hole), Construct(Num)) => Some(Cursor(Num)) // TMConNum
+  | (LArrow(t1, t2), _) =>
+    // TMArrZip1
+    switch (typ_action(t1, a)) {
+    | Some(t1') => Some(LArrow(t1', t2))
+    | _ => None
+    }
+  | (RArrow(t1, t2), _) =>
+    // TMArrZip2
+    switch (typ_action(t2, a)) {
+    | Some(t2') => Some(RArrow(t1, t2'))
+    | _ => None
+    }
+  | _ => None
+  };
+}
 
 // A.3.2
 and exp_action = (e: Zexp.t, d: Dir.t): option(Zexp.t) => {
