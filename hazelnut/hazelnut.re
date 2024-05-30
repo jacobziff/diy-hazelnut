@@ -210,98 +210,129 @@ let rec syn_action =
         (ctx: typctx, (e: Zexp.t, t: Htyp.t), a: Action.t)
         : option((Zexp.t, Htyp.t)) => {
   switch (e, t, a) {
-  // | Zipper Cases? raise(Unimplemented)
-  | (_, _, Move(_: Dir.t)) => raise(Unimplemented)
-  | (_, _, Construct(s: Shape.t)) =>
-    switch (s) {
-    | Arrow => raise(Unimplemented)
-    | Num => raise(Unimplemented)
-    | Asc =>
-      // SaConAsc
-      switch (e) {
-      | Cursor(h) => Some((RAsc(h, Cursor(t)), t))
-      | _ => None
-      }
-    | Var(x: string) =>
-      // SAConVar
-      switch (e, t) {
-      | (Cursor(EHole), Htyp.Hole) =>
-        Some((Cursor(Var(x)), TypCtx.find(x, ctx)))
-      | _ => None
-      }
-    | Lam(x: string) =>
-      // SaConLam
-      switch (e, t) {
-      | (Cursor(EHole), Hole) =>
-        Some((
-          RAsc(Lam(x, EHole), LArrow(Cursor(Hole), Hole)),
-          Arrow(Hole, Hole),
-        ))
-      | _ => None
-      }
-    | Ap =>
-      switch (match(t)) {
-      | Htyp.Hole =>
-        // SaConAPOtw
-        if (compatible(t, Htyp.Arrow(Htyp.Hole, Htyp.Hole))) {
-          None;
-        } else {
-          switch (e) {
-          | Cursor(h: Hexp.t) =>
-            Some((RAp(NEHole(h), Cursor(EHole)), Htyp.Hole))
-          | _ => None
-          };
-        }
-      | Htyp.Arrow(_: Htyp.t, t2: Htyp.t) =>
-        // SAConAPArr
-        switch (e) {
-        | Cursor(h: Hexp.t) => Some((RAp(h, Cursor(EHole)), t2))
-        | _ => None
-        }
-      | _ => None
-      }
-    | Lit(n: int) =>
-      // SAConNumLit
-      switch (e, t) {
-      | (Cursor(EHole), Hole) => Some((Cursor(Lit(n)), Num))
-      | _ => None
-      }
-    | Plus =>
-      if (compatible(t, Htyp.Num)) {
-        // SAConPlus1
-        switch (e) {
-        | Cursor(h) => Some((RPlus(h, Cursor(EHole)), Htyp.Num))
-        | _ => None
-        };
+  | (_, _, Move(d: Dir.t)) =>
+    // SAMove
+    switch (exp_action(e, d)) {
+    | Some(z) => Some((z, t))
+    | _ => None
+    }
+  | (Cursor(h), _, Construct(Asc)) => Some((RAsc(h, Cursor(t)), t)) // SAConAsc
+  | (Cursor(EHole), Hole, Construct(Var(x: string))) =>
+    Some((Cursor(Var(x)), TypCtx.find(x, ctx))) // SAConVar
+  | (Cursor(EHole), Hole, Construct(Lam(x: string))) =>
+    // SAConLam
+    Some((
+      RAsc(Lam(x, EHole), LArrow(Cursor(Hole), Hole)),
+      Arrow(Hole, Hole),
+    ))
+  | (Cursor(h), _, Construct(Ap)) =>
+    switch (match(t)) {
+    | Htyp.Hole =>
+      // SaConAPOtw
+      if (compatible(t, Htyp.Arrow(Htyp.Hole, Htyp.Hole))) {
+        None;
       } else {
-        // SAConPlus2
-        switch (e) {
-        | Cursor(h) => Some((RPlus(NEHole(h), Cursor(EHole)), Htyp.Num))
+        Some((RAp(NEHole(h), Cursor(EHole)), Htyp.Hole));
+      }
+    | Htyp.Arrow(_: Htyp.t, t2: Htyp.t) =>
+      Some((RAp(h, Cursor(EHole)), t2)) // SAConAPArr
+    | _ => None
+    }
+  | (Cursor(EHole), Hole, Construct(Lit(n: int))) =>
+    Some((Cursor(Lit(n)), Num)) // SAConNumLit
+  | (Cursor(h), _, Construct(Plus)) =>
+    if (compatible(t, Htyp.Num)) {
+      // SAConPlus1
+      Some((RPlus(h, Cursor(EHole)), Htyp.Num));
+    } else {
+      // SAConPlus2
+      Some((RPlus(NEHole(h), Cursor(EHole)), Htyp.Num));
+    }
+  | (Cursor(h), _, Construct(NEHole)) => Some((NEHole(Cursor(h)), Hole)) // SAConNEHole
+  | (Cursor(_: Hexp.t), _, Del) => Some((Cursor(EHole), t)) // SADel
+  | (Cursor(NEHole(h: Hexp.t)), Hole, Finish) =>
+    // SAFinish
+    switch (syn(ctx, h)) {
+    | Some(t') => Some((Cursor(h), t'))
+    | _ => None
+    }
+  | (LAsc(e, t'), _, _) =>
+    // SAZipAsc1
+    if (t == t') {
+      switch (ana_action(ctx, e, a, t)) {
+      | Some(z) => Some((LAsc(z, t), t))
+      | _ => None
+      };
+    } else {
+      None;
+    }
+  | (RAsc(e, t1), _, _) =>
+    // SAZipAsc2
+    switch (typ_action(t1, a)) {
+    | Some(t') =>
+      if (ana(ctx, e, erase_typ(t'))) {
+        Some((Zexp.RAsc(e, t'), erase_typ(t')));
+      } else {
+        None;
+      }
+    | _ => None
+    }
+  | (LAp(e1, e2), _, _) =>
+    // SaZipApArr
+    switch (syn(ctx, erase_exp(e1))) {
+    | Some(t2) =>
+      switch (syn_action(ctx, (e1, t2), a)) {
+      | Some((e', t3)) =>
+        switch (match(t3)) {
+        | Arrow(t4, t5) =>
+          if (ana(ctx, e2, t4)) {
+            Some((LAp(e', e2), t5));
+          } else {
+            None;
+          }
         | _ => None
-        };
-      }
-    | NEHole =>
-      // SAConNEHole
-      switch (e) {
-      | Cursor(h) => Some((NEHole(Cursor(h)), Hole))
-      | _ => None
-      }
-    }
-  | (_, _, Del) =>
-    switch (e) {
-    | Cursor(_: Hexp.t) => Some((Cursor(EHole), t)) // SADel
-    | _ => None
-    }
-  | (_, _, Finish) =>
-    switch (e, t) {
-    | (Cursor(NEHole(h: Hexp.t)), Hole) =>
-      // SAFinish
-      switch (syn(ctx, h)) {
-      | Some(t') => Some((Cursor(h), t'))
+        }
       | _ => None
       }
     | _ => None
     }
+  | (RAp(e1, e2), _, _) =>
+    // SaZipApAna
+    switch (syn(ctx, e1)) {
+    | Some(t2) =>
+      switch (match(t2)) {
+      | Arrow(t3, t4) =>
+        switch (ana_action(ctx, e2, a, t3)) {
+        | Some(e') => Some((RAp(e1, e'), t4))
+        | _ => None
+        }
+      | _ => None
+      }
+    | _ => None
+    }
+  | (LPlus(e1, e2), Num, _) =>
+    // SaZipPlus1
+    switch (ana_action(ctx, e1, a, Num)) {
+    | Some(e') => Some((LPlus(e', e2), Num))
+    | _ => None
+    }
+  | (RPlus(e1, e2), Num, _) =>
+    // SaZipPlus2
+    switch (ana_action(ctx, e2, a, Num)) {
+    | Some(e') => Some((RPlus(e1, e'), Num))
+    | _ => None
+    }
+  | (NEHole(e'), Hole, _) =>
+    // SaZipHole
+    switch (syn(ctx, erase_exp(e'))) {
+    | Some(t') =>
+      switch (syn_action(ctx, (e', t'), a)) {
+      | Some((z, _)) => Some((NEHole(z), Hole))
+      | _ => None
+      }
+    | _ => None
+    }
+  | _ => None
   };
 }
 
@@ -320,8 +351,6 @@ and ana_action =
     | Move(d: Dir.t) => exp_action(e, d) // AAMove
     | Construct(s: Shape.t) =>
       switch (s) {
-      | Arrow => None // Unsure about this
-      | Num => None // Unsure about this
       | Asc =>
         // AAConAsc
         switch (e) {
